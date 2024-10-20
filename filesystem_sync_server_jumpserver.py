@@ -4,6 +4,13 @@ import time
 import threading
 import hashlib
 import argparse
+import logging
+
+logging.basicConfig(
+    filename='jumpserver.log',        # 指定日志文件
+    level=logging.INFO,        # 设置日志级别
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 BJ_DIR = '/home/mluo/sync_from_bj_to_ny5'  # 服务器的文件夹路径
 NY5_DIR = '/home/mluo/sync_from_ny5_to_bj'
@@ -67,6 +74,7 @@ def monitor_folder(conn, addr):
                     send_updates(compare_result, conn, monitor_dir, addr)
                 except:
                     print(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
+                    logging.error(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
                     lock.release()
                     return
                 lock.release()
@@ -95,6 +103,7 @@ def monitor_folder(conn, addr):
                     send_updates(compare_result, conn, monitor_dir, addr)
                 except:
                     print(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
+                    logging.error(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
                     lock.release()
                     return
                 lock.release()
@@ -102,6 +111,7 @@ def monitor_folder(conn, addr):
             time.sleep(TIME_INTERVAL)  # 每隔一段时间检查一次文件夹
     else:
         print("客户端IP不符合要求, 必须为北京或纽约的主机, 否则不接受客户端的TCP连接请求")
+        logging.error("客户端IP不符合要求, 必须为北京或纽约的主机, 否则不接受客户端的TCP连接请求")
         return
 
 def send_updates(result:dict, conn, monitor_dir, addr):
@@ -114,6 +124,7 @@ def send_updates(result:dict, conn, monitor_dir, addr):
             message = f"ADD|{os.path.basename(file_path)}|{len(file_data)}EOF".encode()
             conn.sendall(message)
             print(f"{monitor_dir}添加{filename}的文件信息已发送到{addr}，等待客户端同步...")
+            logging.info(f"{monitor_dir}添加{filename}的文件信息已发送到{addr}，等待客户端同步...")
     elif result["modified"]:
         for filename in list(result["modified"].keys()):
             file_path = os.path.join(monitor_dir, filename)
@@ -122,11 +133,13 @@ def send_updates(result:dict, conn, monitor_dir, addr):
             message = f"MODIFY|{os.path.basename(file_path)}|{len(file_data)}EOF".encode()
             conn.sendall(message)
             print(f"{monitor_dir}修改{filename}的文件信息已发送到{addr}，等待客户端同步...")
+            logging.info(f"{monitor_dir}修改{filename}的文件信息已发送到{addr}，等待客户端同步...")
     elif result["removed"]:
         for filename in list(result["removed"].keys()):
             message = f"REMOVE|{filename}|0EOF".encode()
             conn.sendall(message)
             print(f"{monitor_dir}删除{filename}的文件信息已发送到{addr}，等待客户端同步...")
+            logging.info(f"{monitor_dir}删除{filename}的文件信息已发送到{addr}，等待客户端同步...")
 
 def receive_updates(conn, addr):
     """接收客户端发来的文件夹更新信息, 并根据BJ还是NYU采取不同的逻辑"""
@@ -135,6 +148,7 @@ def receive_updates(conn, addr):
             data = conn.recv(1024)
         except:
             print(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
+            logging.error(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
             return
         if not data:
             continue
@@ -146,8 +160,10 @@ def receive_updates(conn, addr):
         for data in list_data: 
             if data == "ADD Transmission End":
                 print(f"来自{addr}的添加文件{filename}已被同步添加.") 
+                logging.info(f"来自{addr}的添加文件{filename}已被同步添加.")
             elif data == "MODIFY Transmission End":
                 print(f"来自{addr}的修改文件{filename}已被同步修改.") 
+                logging.info(f"来自{addr}的修改文件{filename}已被同步修改.")
             else:        
                 command, filename, file_size = data.split('|') #这里file_data只有开头一部分
                 file_size = int(file_size)
@@ -160,6 +176,7 @@ def receive_updates(conn, addr):
                     if os.path.exists(file_path):
                         os.remove(file_path)
                         print(f"{os.path.basename(file_path)}下文件{filename}已被同步删除")
+                        logging.info(f"{os.path.basename(file_path)}下文件{filename}已被同步删除")
 
         lock.release()
 
@@ -172,6 +189,7 @@ def check_conn(conn, addr):
             time.sleep(5)
         except:
             print(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
+            logging.error(f"来自{addr}的客户端掉线，若长时间未恢复则可能死机，请检查")
             return
 
 init_rsync = False
@@ -185,6 +203,7 @@ def begin_rsync(conn):
                 return 
             if data == "Client Rsync ERROR!":
                 print("客户端初始化文件同步失败，等待重连...")
+                logging.error("客户端初始化文件同步失败，等待重连...")
                 return
         except:
             return 
@@ -194,18 +213,23 @@ if __name__ == "__main__":
     server_socket.bind((HOST, PORT))
     server_socket.listen(1)
     print(f"{HOST}服务器在{PORT}端口等待连接...")
+    logging.info(f"{HOST}服务器在{PORT}端口等待连接...")
 
     while True:
-        conn, addr = server_socket.accept()
-        print(f"来自{addr}客户端的连接建立")
+        conn, ip_addr = server_socket.accept()
+        print(f"来自{ip_addr}客户端的连接建立")
+        logging.info(f"来自{ip_addr}客户端的连接建立")
 
         data = conn.recv(1024).decode()
+        addr = ''
         if data == 'Bei Jing':
             addr = '北京'
             print("客户端同步请求来自北京")
+            logging.info("客户端同步请求来自北京")
         elif data == 'New York':
             addr = '纽约'
             print("客户端同步请求来自纽约")
+            logging.info("客户端同步请求来自纽约")
 
         # 启动两个线程：监控线程和接收线程
         
@@ -220,23 +244,29 @@ if __name__ == "__main__":
         if not init_rsync:
             lock.release()
             print(f"来自{addr}的客户端初始化文件同步失败，可能是客户端掉线，若长时间未恢复则可能死机，请检查")
+            logging.error(f"来自{addr}的客户端初始化文件同步失败，可能是客户端掉线，若长时间未恢复则可能死机，请检查")
             continue
         print(f"与{addr}客户端文件初始化同步结束")
+        logging.info(f"与{addr}客户端文件初始化同步结束")
         lock.release()
 
         if addr == 'Bei Jing':
             ny5_previous_state = {}
             print(f"开始监控{NY5_DIR},向{addr}客户端发送文件夹更新信息") 
+            logging.info(f"开始监控{NY5_DIR},向{addr}客户端发送文件夹更新信息")
             t1.start()
             time.sleep(5)   
-            print(f"开始接收来自{addr}客户端的更新信息，同步{BJ_DIR}文件夹")        
+            print(f"开始接收来自{addr}客户端的更新信息，同步{BJ_DIR}文件夹")   
+            logging.info(f"开始接收来自{addr}客户端的更新信息，同步{BJ_DIR}文件夹")     
             t2.start()
         elif addr == 'New York':
             bj_previous_state = {}
-            print(f"开始监控{BJ_DIR},向{addr}客户端发送文件夹更新信息") 
+            print(f"开始监控{BJ_DIR},向{addr}客户端发送文件夹更新信息")
+            logging.info(f"开始监控{BJ_DIR},向{addr}客户端发送文件夹更新信息") 
             t1.start()
             time.sleep(5)   
-            print(f"开始接收来自{addr}客户端的更新信息，同步{NY5_DIR}文件夹")        
+            print(f"开始接收来自{addr}客户端的更新信息，同步{NY5_DIR}文件夹")   
+            logging.info(f"开始接收来自{addr}客户端的更新信息，同步{NY5_DIR}文件夹")     
             t2.start()
 
         
